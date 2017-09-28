@@ -129,12 +129,62 @@ function processMessage(event){
       // You may get a text or attachment but not both
       if (message.text) {
         var formattedMsg = message.text.trim();
-		updatedText = "";
-		//sendMessage(senderId, {text: formattedMsg});
-		respondAccordingToTone(senderId,message.text);
+        updatedText = "";
+		    //sendMessage(senderId, {text: formattedMsg});
+		    respondAccordingToTone(senderId,formattedMsg);
         //getNLUforCTA(senderId,formattedMsg);
       }
+      else if (message.attachments){
+        if (message.attachments[0].type==="audio"){
+          var audioLink =   message.attachments[0].payload.url;
+          console.log("Audio URL: " + audioLink);
+          convertAudioToText(senderId,audioLink);
+        }
+        
+      }
   }
+}
+
+function convertAudioToText(senderId, audioLink){
+  console.log("came into convertAudioToText");
+  request({
+    url: "https://us-central1-sublime-calling-165813.cloudfunctions.net/convertAudioFormat",
+    method: "POST",
+    json: {
+      "audioLink": audioLink      
+    }
+  }, function(error, response, body) {
+    if (error) {
+      console.log("Error Converting Audioclip Format: " + error);
+      sendMessage(senderId,{text:"Error Converting Audioclip Format"});
+    }
+    else{
+      //var ticket = JSON.parse(body);
+      console.log("Converted Audioclip Format: " + body);
+      var convertedAudioLink = body.opAudioLink;
+      console.log("Converted Audioclip URL: " + convertedAudioLink);
+      request({
+        url: "https://us-central1-sublime-calling-165813.cloudfunctions.net/telciaSpeechToText",
+        method: "POST",
+        json: {
+          "audioLink": convertedAudioLink      
+        }
+      }, function(spchErr, spchRes, spchBody) {
+          if (error) {
+            console.log("Error Converting Speech to Text: " + spchErr);
+            sendMessage(senderId,{text:"Error Converting Speech to Text"});
+          }
+          else{
+            console.log("Converted Audio to Text: " + spchBody);
+            var extractedText = spchBody.text;
+            console.log("Converted Audio to Text: " + extractedText);
+            var formattedMsg = extractedText.trim();
+            respondAccordingToTone(senderId,formattedMsg);
+          }
+
+      });
+    }
+  });
 }
 
 function getNLUforCTA(senderId,message){
@@ -153,17 +203,19 @@ function getNLUforCTA(senderId,message){
 
         var nluAction = nluData.result.action;
         var contexts = nluData.result.contexts;
-		console.log("nluAction value is" + nluAction);
+		    console.log("nluAction value is" + nluAction);
         
         if(nluAction){
           switch(nluAction){
           	case "triageBBIssues" :
               //sendMessage(senderId,{text:"Suggest Creating Ticket"});
-              sendMessage(senderId, {text:nluData.result.fulfillment.speech});
+              updatedText = "";
+              sendMessage(senderId,{text:nluData.result.fulfillment.speech});
               break;
             case "triageWirelessIssues" :
-              //sendMessage(senderId,{text:"Suggest Creating Ticket"});  
-              sendMessage(senderId, {text:nluData.result.fulfillment.speech});
+              //sendMessage(senderId,{text:"Suggest Creating Ticket"}); 
+              updatedText = ""; 
+              sendMessage(senderId,{text:nluData.result.fulfillment.speech});
               break;
             case "triageToTicket" :
               //sendMessage(senderId,{text:"Suggest Creating Ticket"});
@@ -176,13 +228,14 @@ function getNLUforCTA(senderId,message){
               createTicket(senderId, message);
               break;
             case "GetTicketStatus":
-            updatedText = "";
+              updatedText = "";
               callToGetTicketStatus(senderId,  nluData.result.parameters.Ticket);
               //sendMessage(senderId,{text:"Getting Ticket Status"});
               //sendMessage(senderId,{text:"Getting Ticket Status"});
               break;
             case "ChangeTicketStatus":
-              callToUpdateTicketStatus(senderId,  nluData.result.parameters.TicketStatus, nluData.result.parameters.Ticket);
+              updatedText = "";
+              callToUpdateTicketStatus(senderId, nluData.result.parameters.TicketStatus, nluData.result.parameters.Ticket);
               //sendMessage(senderId,{text:"Changing Ticket Status"});
               break;
             case "smalltalk.agent" :
@@ -191,19 +244,23 @@ function getNLUforCTA(senderId,message){
             case "smalltalk.agent.bad" :
             case "smalltalk.agent.good" :            
               //respondAccordingToTone(senderId, message);
-	      sendMessage(senderId, {text:nluData.result.fulfillment.speech});
+              updatedText = "";
+	            sendMessage(senderId, {text:nluData.result.fulfillment.speech});
               break;
             case "ExtractTicketNo":              
               //sendMessage(senderId,{text:"extracting ticket number"});
+              updatedText = "";
               getContext(senderId,contexts);
               break;
             case "ConfirmTicket":
               //sendMessage(senderId,{text:"confirming ticket"});
               //sendMessage(senderId,{text:"contexts :"+body});
-              getContext(senderId, contexts);
+              updatedText = "";
+              getContext(senderId,contexts);
               break;
             default:
               //respondAccordingToTone(senderId,message);
+              updatedText = "";
               sendMessage(senderId, {text:nluData.result.fulfillment.speech});
               break;
           }
@@ -342,7 +399,7 @@ function updateTicketStatus(senderId, toStatus, ticketId){
         var ticketStatus = ticketJson.status;
         var ticketSubStatus = ticketJson.subStatus; 
         var responseMSg = "Ticket "+ ttId+" "+ticketStatus;
-        if(ticketStatus == "created"){
+        if(ticketStatus === "created"){
           responseMSg = "Ticket "+ ttId+" reopened";
         }
         if(ticketSubStatus){
@@ -552,6 +609,7 @@ function getTicketStatus(senderId, ticketId){
 }
 
 function createTicket(senderId,receivedText){
+  console.log('Creating Ticket for Problem : '+receivedText);
    request({
     url: "https://lychee-cake-64261.herokuapp.com/API/troubleTicket",
     method: "POST",
@@ -565,6 +623,7 @@ function createTicket(senderId,receivedText){
       }]
     }
   }, function(error, response, body) {
+    console.log('Response from Ticket API :'+JSON.stringify(response));
     if (error) {
       console.log("Error creating ticket: " + error);
       sendMessage(senderId,{text:"Error creating ticket"});
@@ -612,15 +671,16 @@ function respondAccordingToTone(senderId,receivedText){
 		
   		//if(!responded) {
   			if (maxValue) {
+          console.log("Sentiment :"+maxValue.tone_id);
   				switch(maxValue.tone_id){
   				  case "sadness":
-  					updatedText = maxValue.tone_id + ". I'm sorry about how you are feeling about our service.\n"
+  					updatedText = "I'm sorry about how you are feeling about our service.\n"
   					break;
   				  case "fear":
-  					updatedText = maxValue.tone_id + ". We are here to help you out to fix your issues. You can have less worry about your issue\n"
+  					updatedText =  "We are here to help you out to fix your issues. You can have less worry about your issue\n"
   				  case "anger":
   				  case "disgust":
-  					updatedText = maxValue.tone_id + ". I'm sorry. I'm still learning. \nOur support team will get in touch with you now.\n We would also like to provide $5 credit to your account which will be adjusted in next bill.";
+  					updatedText =  "I'm sorry. Our support team will get in touch with you now.\n We would also like to provide $5 credit to your account which will be adjusted in next bill.";
   					//responded = true;
   					break;
   				  case "joy":
