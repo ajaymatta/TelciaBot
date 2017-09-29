@@ -2,7 +2,13 @@ var express = require("express");
 var request = require("request");
 var bodyParser = require("body-parser");
 var htmlToText = require('html-to-text');
+var mongoose = require('mongoose');
+var validation = require("validator");
 
+//Connecting to DB
+mongoose.connect(process.env.MONGODB_URI);
+
+var Interaction = require("./models/interaction");
 
 var app = express();
 app.use(bodyParser.urlencoded({extended: false}));
@@ -10,6 +16,7 @@ app.use(bodyParser.json());
 app.listen((process.env.PORT || 5000));
 
 var updatedText = "";
+var nluData = "";
 
 // Server index page
 app.get("/", function (req, res) {
@@ -30,7 +37,7 @@ app.get("/webhook", function (req, res) {
 
 // All callbacks for Messenger will be POST-ed here
 app.post("/webhook", function (req, res) {
-	console.log("came to first post webhook");
+  console.log("came to first post webhook");
   // Make sure this is a page subscription
   if (req.body.object == "page") {
     // Iterate over each entry
@@ -39,7 +46,7 @@ app.post("/webhook", function (req, res) {
       // Iterate over each messaging event
       entry.messaging.forEach(function(event) {
         if (event.postback) {
-			console.log("calling processPostback");
+      console.log("calling processPostback");
           processPostback(event);
         }
         else if (event.message) {
@@ -57,7 +64,7 @@ app.post("/webhook", function (req, res) {
 
 
 function processPostback(event) {
-	console.log("came into processPostback");
+  console.log("came into processPostback");
   var senderId = event.sender.id;
   var payload = event.postback.payload; 
 
@@ -73,7 +80,7 @@ function processPostback(event) {
 
 
 function greetingMsg(senderId){
-	console.log("came into greetingMsg");
+  console.log("came into greetingMsg");
    request({
       url: "https://graph.facebook.com/v2.6/" + senderId,
       qs: {
@@ -97,10 +104,13 @@ function greetingMsg(senderId){
 
 // sends message to user
 function sendMessage(recipientId, message) {
-	console.log("came into sendMessage");
-	//console.log("the message is" + message.text);
+  console.log("came into sendMessage");
+  //console.log("the message is" + message.text);
 	message.text = updatedText +"\n" + message.text;
 	console.log("the message is" + message.text);
+
+  insertIntoDatebase(recipientId, message, nluData);
+
   request({
     url: "https://graph.facebook.com/v2.6/me/messages",
     qs: {access_token: process.env.PAGE_ACCESS_TOKEN},
@@ -117,11 +127,13 @@ function sendMessage(recipientId, message) {
 }
 
 
+
 function processMessage(event){
-	console.log("came into processMessage");
+  console.log("came into processMessage");
   if (!event.message.is_echo) {
       var message = event.message;
       var senderId = event.sender.id;
+      //console.log("Event is:" + event);
       console.log("Received message from senderId: " + senderId);
       console.log("Message is: " + JSON.stringify(message));
       var responseMsg="";
@@ -130,8 +142,8 @@ function processMessage(event){
       if (message.text) {
         var formattedMsg = message.text.trim();
         updatedText = "";
-		    //sendMessage(senderId, {text: formattedMsg});
-		    respondAccordingToTone(senderId,formattedMsg);
+        //sendMessage(senderId, {text: formattedMsg});
+        respondAccordingToTone(senderId,formattedMsg);
         //getNLUforCTA(senderId,formattedMsg);
       }
       else if (message.attachments){
@@ -188,7 +200,7 @@ function convertAudioToText(senderId, audioLink){
 }
 
 function getNLUforCTA(senderId,message){
-	console.log("came into getNLUforCTA");
+  console.log("came into getNLUforCTA");
    request({
       url: "https://api.api.ai/v1/query?v=20150910&lang=en&sessionId="+senderId+"&query="+message,
       headers: {
@@ -199,18 +211,22 @@ function getNLUforCTA(senderId,message){
       if (error) {
         sendMessage(senderId,{text:"Error from API.ai"});
       } else {
-        var nluData = JSON.parse(body);
+        nluData = JSON.parse(body);
 
         var nluAction = nluData.result.action;
         var contexts = nluData.result.contexts;
-		    console.log("nluAction value is" + nluAction);
+        console.log("nluAction value is" + nluAction);
         
         if(nluAction){
           switch(nluAction){
-          	case "triageBBIssues" :
+            case "triageBBIssues" :
               //sendMessage(senderId,{text:"Suggest Creating Ticket"});
               updatedText = "";
               sendMessage(senderId,{text:nluData.result.fulfillment.speech});
+              break;
+            case "BBIssues.BBIssues-no":
+              updatedText = "finally came here";
+              //createTicket(senderId, message);
               break;
             case "triageWirelessIssues" :
               //sendMessage(senderId,{text:"Suggest Creating Ticket"}); 
@@ -245,7 +261,7 @@ function getNLUforCTA(senderId,message){
             case "smalltalk.agent.good" :            
               //respondAccordingToTone(senderId, message);
               updatedText = "";
-	            sendMessage(senderId, {text:nluData.result.fulfillment.speech});
+              sendMessage(senderId, {text:nluData.result.fulfillment.speech});
               break;
             case "ExtractTicketNo":              
               //sendMessage(senderId,{text:"extracting ticket number"});
@@ -271,22 +287,22 @@ function getNLUforCTA(senderId,message){
 }
 
 function triageBBIssues(senderId, message){
-	sendMessage(senderId,{text:"Follow the below steps and let me know if the Broadband issue still persists "});
+  sendMessage(senderId,{text:"Follow the below steps and let me know if the Broadband issue still persists "});
 }
 
 function triageWirelessIssues(senderId, message){
-	sendMessage(senderId,{text:"Follow the below steps and let me know if the Mobile issue still persists "});
+  sendMessage(senderId,{text:"Follow the below steps and let me know if the Mobile issue still persists "});
 }
 
 function callToCreateTicket(senderId,contexts){
 
-	var probDesc = "";
-	for (var i=0; i<contexts.length;i++){ 
-	    if(contexts[i].name==='triage'){
-	      probDesc=contexts[i].parameters.any;      
-	    }
-  	}
-  	createTicket(senderId, probDesc);	
+  var probDesc = "";
+  for (var i=0; i<contexts.length;i++){ 
+      if(contexts[i].name==='triage'){
+        probDesc=contexts[i].parameters.any;      
+      }
+    }
+    createTicket(senderId, probDesc); 
 }
 
 function getContext(senderId,contexts){
@@ -661,44 +677,90 @@ function respondAccordingToTone(senderId,receivedText){
         //sendMessage(senderId, {text: "Tone Received."});
         var emoTones = tone.document_tone.tone_categories[0].tones;
         //var responded = false;
-		    var maxValue = 0;
+        var maxValue = 0;
         for (var i=0; i<emoTones.length;i++){
           if(emoTones[i].score>0.5){
-    			  if (!maxValue || parseInt(emoTones[i].score) > parseInt(maxValue.score))
-                maxValue = emoTones[i];	              
+            if (!maxValue || parseInt(emoTones[i].score) > parseInt(maxValue.score))
+                maxValue = emoTones[i];               
           }
         }
-		
-  		//if(!responded) {
-  			if (maxValue) {
+    
+      //if(!responded) {
+        if (maxValue) {
           console.log("Sentiment :"+maxValue.tone_id);
-  				switch(maxValue.tone_id){
-  				  case "sadness":
-  					updatedText = "I'm sorry about how you are feeling about our service.\n"
-  					break;
-  				  case "fear":
-  					updatedText =  "We are here to help you out to fix your issues. You can have less worry about your issue\n"
-  				  case "anger":
-  				  case "disgust":
-  					updatedText =  "I'm sorry. Our support team will get in touch with you now.\n We would also like to provide $5 credit to your account which will be adjusted in next bill.";
-  					//responded = true;
-  					break;
-  				  case "joy":
-  					updatedText = "Glad you are happy with my service.";
-  					//responded = true;
-  					break;
-  				}
-  			} else {
-  				updatedText = "";
-  			}
-  		//}
-  		
-  		console.log ("Updated Text value is:" + updatedText);
+          switch(maxValue.tone_id){
+            case "sadness":
+            updatedText = "I'm sorry about how you are feeling about our service.\n"
+            break;
+            case "fear":
+            updatedText =  "We are here to help you out to fix your issues. You can have less worry about your issue\n"
+            case "anger":
+            case "disgust":
+            updatedText =  "I'm sorry. Our support team will get in touch with you now.\n We would also like to provide $5 credit to your account which will be adjusted in next bill.";
+            //responded = true;
+            break;
+            case "joy":
+            updatedText = "Glad you are happy with my service.";
+            //responded = true;
+            break;
+          }
+        } else {
+          updatedText = "";
+        }
+      //}
+      
+      console.log ("Updated Text value is:" + updatedText);
       if (maxValue.tone_id != "anger") {
-  		  getNLUforCTA(senderId,receivedText.trim());
+        getNLUforCTA(senderId,receivedText.trim());
       } else {
         sendMessage(senderId, {text:""});
       }
     }
   });
+}
+
+function insertIntoDatebase (senderId, message, nluData) {
+  if (nluData) {
+    if (!nluData.result || !nluData.result.resolvedQuery) {
+      nluData.result.resolvedQuery = "";
+    }
+    if (!nluData.result || !nluData.result.action) {
+      nluData.result.action = "";
+    }    
+    if (!nluData.result.fulfillment || !nluData.result.fulfillment.speech) {
+      nluData.result.fulfillment.speech = "";
+    }
+
+
+    var contextArray = [];
+    for (var i = 0;i < nluData.result.contexts.length; i++) {
+      var tempcontext = {};
+      tempcontext.name="";
+      tempcontext.lifespan=0;
+      console.log("name:"+ nluData.result.contexts[i].name);
+      console.log("lifespan:"+ nluData.result.contexts[i].lifespan);
+      tempcontext.name = nluData.result.contexts[i].name;
+      tempcontext.lifespan = nluData.result.contexts[i].lifespan;
+      console.log("tempcontext:"+ tempcontext.name + tempcontext.lifespan);
+      contextArray.push(tempcontext);
+    }
+    
+    var interactionInsert = new Interaction({
+      id: "1",
+      user: senderId,
+      creationDate: new Date(),
+      resolvedQuery: nluData.result.resolvedQuery,
+      action: nluData.result.action,
+      contexts: contextArray,
+      response: nluData.result.fulfillment.speech
+    });
+    interactionInsert.save(function(err) {  
+      if (err) throw err;
+      console.log('User created!');
+    });
+  }
+}
+
+function getInfoFromDatabase() {
+
 }
