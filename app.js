@@ -106,8 +106,8 @@ function greetingMsg(senderId){
 function sendMessage(recipientId, message) {
   console.log("came into sendMessage");
   //console.log("the message is" + message.text);
-	message.text = updatedText +"\n" + message.text;
-	console.log("the message is" + message.text);
+  message.text = updatedText +"\n" + message.text;
+  console.log("the message is" + message.text);
 
   insertIntoDatebase(recipientId, message, nluData);
 
@@ -779,9 +779,9 @@ function insertIntoDatebase (senderId, message, nluData) {
   }
 }
 
-function getInfoFromDatabase(senderId, action1) {
+function getInfoFromDatabase(senderId, triggerAction) {
   //var InteractionData = mongoose.model("Interaction", InteractionSchema);
-  Interaction.findOne({ action: action1 }).sort('-creationDate').exec(function (err, member) {
+  Interaction.findOne({ action: triggerAction }).sort('-creationDate').exec(function (err, member) {
     if (err) {
       return err;
     }
