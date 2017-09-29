@@ -225,14 +225,32 @@ function getNLUforCTA(senderId,message){
               sendMessage(senderId,{text:nluData.result.fulfillment.speech});
               break;
             case "BBIssues.BBIssues-no":
-              updatedText = "finally came here";
+              //updatedText = "finally came here";
               //createTicket(senderId, message);
+              getInfoFromDatabase(senderId, "triageBBIssues");
+              //createTicket(senderId, msg);
               break;
+            case "BBIssues.BBIssues-yes" :
+              //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+              updatedText = "";
+              sendMessage(senderId,{text:nluData.result.fulfillment.speech});
+              break;  
             case "triageWirelessIssues" :
               //sendMessage(senderId,{text:"Suggest Creating Ticket"}); 
               updatedText = ""; 
               sendMessage(senderId,{text:nluData.result.fulfillment.speech});
               break;
+            case "MobileDataIssues.MobileDataIssues-no":
+              //updatedText = "finally came here 2";
+              //createTicket(senderId, message);
+              getInfoFromDatabase(senderId, "triageWirelessIssues");
+              //createTicket(senderId, msg);
+              break;  
+            case "MobileDataIssues.MobileDataIssues-yes" :
+              //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+              updatedText = "";
+              sendMessage(senderId,{text:nluData.result.fulfillment.speech});
+              break;   
             case "triageToTicket" :
               //sendMessage(senderId,{text:"Suggest Creating Ticket"});
               updatedText = "";
@@ -761,6 +779,14 @@ function insertIntoDatebase (senderId, message, nluData) {
   }
 }
 
-function getInfoFromDatabase() {
-
+function getInfoFromDatabase(senderId, action1) {
+  //var InteractionData = mongoose.model("Interaction", InteractionSchema);
+  Interaction.findOne({ action: action1 }).sort('-creationDate').exec(function (err, member) {
+    if (err) {
+      return err;
+    }
+    console.log("member value is" + member);
+    //return member.resolvedQuery;
+    createTicket(senderId, member.resolvedQuery);
+  });
 }
