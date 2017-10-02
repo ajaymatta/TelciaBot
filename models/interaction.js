@@ -3,7 +3,7 @@ var Schema = mongoose.Schema;
 
 var InteractionSchema = new Schema({
   id: {type: String},
-  user: {type:Number},
+  user: {type:String},
   creationDate: {type: Date,default: Date.now},
   resolvedQuery: {type: String},
   action: {type: String},
