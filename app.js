@@ -4,6 +4,8 @@ var bodyParser = require("body-parser");
 var htmlToText = require('html-to-text');
 var mongoose = require('mongoose');
 var validation = require("validator");
+var striptags = require('striptags');
+var resToUiPath = null;
 
 //Connecting to DB
 mongoose.connect(process.env.MONGODB_URI);
@@ -46,7 +48,7 @@ app.post("/webhook", function (req, res) {
       // Iterate over each messaging event
       entry.messaging.forEach(function(event) {
         if (event.postback) {
-      console.log("calling processPostback");
+          console.log("calling processPostback");
           processPostback(event);
         }
         else if (event.message) {
@@ -60,7 +62,20 @@ app.post("/webhook", function (req, res) {
 });
 
 
-
+// Email Converstaion via UIPath
+app.get("/email", function (req, res) {
+  
+  var msg = req.query.message;
+  var senderId = req.query.senderId;
+  console.log("From : "+senderId + " \n Message : \n"+msg);
+  var formattedMsg  = striptags(msg.trim());  
+  updatedText = "";  
+  resToUiPath=res;
+  console.log("From : "+senderId + " Message : "+formattedMsg);
+  //sendMessage(senderId, {text: formattedMsg});
+  respondAccordingToTone(senderId,formattedMsg);
+  
+});
 
 
 function processPostback(event) {
@@ -111,19 +126,27 @@ function sendMessage(recipientId, message) {
 
   insertIntoDatebase(recipientId, message, nluData);
 
-  request({
-    url: "https://graph.facebook.com/v2.6/me/messages",
-    qs: {access_token: process.env.PAGE_ACCESS_TOKEN},
-    method: "POST",
-    json: {
-      recipient: {id: recipientId},
-      message: message,
-    }
-  }, function(error, response, body) {
-    if (error) {
-      console.log("Error sending message: " + response.error);
-    }
-  });
+  if(recipientId.indexOf("@") !== -1)
+  {
+    resToUiPath.status(200).send(message.text);
+  }
+  else{
+      request({
+        url: "https://graph.facebook.com/v2.6/me/messages",
+        qs: {access_token: process.env.PAGE_ACCESS_TOKEN},
+        method: "POST",
+        json: {
+          recipient: {id: recipientId},
+          message: message,
+        }
+      }, function(error, response, body) {
+        if (error) {
+          console.log("Error sending message: " + response.error);
+        }
+      });  
+  }
+
+
 }
 
 
@@ -201,8 +224,17 @@ function convertAudioToText(senderId, audioLink){
 
 function getNLUforCTA(senderId,message){
   console.log("came into getNLUforCTA");
+  var sessionId = null;
+  
+  if(senderId.indexOf("@") !== -1)
+  {
+    sessionId="123456789";
+  }
+  else{
+    sessionId=senderId;
+  }
    request({
-      url: "https://api.api.ai/v1/query?v=20150910&lang=en&sessionId="+senderId+"&query="+message,
+      url: "https://api.api.ai/v1/query?v=20150910&lang=en&sessionId="+sessionId+"&query="+message,
       headers: {
         Authorization: "Bearer "+process.env.API_AI_TOKEN
       },
@@ -212,93 +244,102 @@ function getNLUforCTA(senderId,message){
         sendMessage(senderId,{text:"Error from API.ai"});
       } else {
         nluData = JSON.parse(body);
+        console.log("NLU Response : \n" + body);
 
-        var nluAction = nluData.result.action;
-        var contexts = nluData.result.contexts;
-        console.log("nluAction value is" + nluAction);
-        
-        if(nluAction){
-          switch(nluAction){
-            case "triageBBIssues" :
-              //sendMessage(senderId,{text:"Suggest Creating Ticket"});
-              updatedText = "";
-              sendMessage(senderId,{text:nluData.result.fulfillment.speech});
-              break;
-            case "BBIssues.BBIssues-no":
-              //updatedText = "finally came here";
-              //createTicket(senderId, message);
-              getInfoFromDatabase(senderId, "triageBBIssues");
-              //createTicket(senderId, msg);
-              break;
-            case "BBIssues.BBIssues-yes" :
-              //sendMessage(senderId,{text:"Suggest Creating Ticket"});
-              updatedText = "";
-              sendMessage(senderId,{text:nluData.result.fulfillment.speech});
-              break;  
-            case "triageWirelessIssues" :
-              //sendMessage(senderId,{text:"Suggest Creating Ticket"}); 
-              updatedText = ""; 
-              sendMessage(senderId,{text:nluData.result.fulfillment.speech});
-              break;
-            case "MobileDataIssues.MobileDataIssues-no":
-              //updatedText = "finally came here 2";
-              //createTicket(senderId, message);
-              getInfoFromDatabase(senderId, "triageWirelessIssues");
-              //createTicket(senderId, msg);
-              break;  
-            case "MobileDataIssues.MobileDataIssues-yes" :
-              //sendMessage(senderId,{text:"Suggest Creating Ticket"});
-              updatedText = "";
-              sendMessage(senderId,{text:nluData.result.fulfillment.speech});
-              break;   
-            case "triageToTicket" :
-              //sendMessage(senderId,{text:"Suggest Creating Ticket"});
-              updatedText = "";
-              callToCreateTicket(senderId, contexts);
-              break;
-            case "CreateTicket" :
-              //sendMessage(senderId,{text:"Suggest Creating Ticket"});
-              updatedText = "";
-              createTicket(senderId, message);
-              break;
-            case "GetTicketStatus":
-              updatedText = "";
-              callToGetTicketStatus(senderId,  nluData.result.parameters.Ticket);
-              //sendMessage(senderId,{text:"Getting Ticket Status"});
-              //sendMessage(senderId,{text:"Getting Ticket Status"});
-              break;
-            case "ChangeTicketStatus":
-              updatedText = "";
-              callToUpdateTicketStatus(senderId, nluData.result.parameters.TicketStatus, nluData.result.parameters.Ticket);
-              //sendMessage(senderId,{text:"Changing Ticket Status"});
-              break;
-            case "smalltalk.agent" :
-            case "support.live_person" :            
-            case "smalltalk.agent.annoying" :
-            case "smalltalk.agent.bad" :
-            case "smalltalk.agent.good" :            
-              //respondAccordingToTone(senderId, message);
-              updatedText = "";
-              sendMessage(senderId, {text:nluData.result.fulfillment.speech});
-              break;
-            case "ExtractTicketNo":              
-              //sendMessage(senderId,{text:"extracting ticket number"});
-              updatedText = "";
-              getContext(senderId,contexts);
-              break;
-            case "ConfirmTicket":
-              //sendMessage(senderId,{text:"confirming ticket"});
-              //sendMessage(senderId,{text:"contexts :"+body});
-              updatedText = "";
-              getContext(senderId,contexts);
-              break;
-            default:
-              //respondAccordingToTone(senderId,message);
-              updatedText = "";
-              sendMessage(senderId, {text:nluData.result.fulfillment.speech});
-              break;
+        if(nluData.result!==null){
+          var nluAction = nluData.result.action;
+          var contexts = nluData.result.contexts;
+          console.log("nluAction value is" + nluAction);
+          
+          if(nluAction){
+            switch(nluAction){
+              case "triageBBIssues" :
+                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+                updatedText = "";
+                sendMessage(senderId,{text:nluData.result.fulfillment.speech});
+                break;
+              case "BBIssues.BBIssues-no":
+                //updatedText = "finally came here";
+                //createTicket(senderId, message);
+                getInfoFromDatabase(senderId, "triageBBIssues");
+                //createTicket(senderId, msg);
+                break;
+              case "BBIssues.BBIssues-yes" :
+                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+                updatedText = "";
+                sendMessage(senderId,{text:nluData.result.fulfillment.speech});
+                break;  
+              case "triageWirelessIssues" :
+                //sendMessage(senderId,{text:"Suggest Creating Ticket"}); 
+                updatedText = ""; 
+                sendMessage(senderId,{text:nluData.result.fulfillment.speech});
+                break;
+              case "MobileDataIssues.MobileDataIssues-no":
+                //updatedText = "finally came here 2";
+                //createTicket(senderId, message);
+                getInfoFromDatabase(senderId, "triageWirelessIssues");
+                //createTicket(senderId, msg);
+                break;  
+              case "MobileDataIssues.MobileDataIssues-yes" :
+                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+                updatedText = "";
+                sendMessage(senderId,{text:nluData.result.fulfillment.speech});
+                break;   
+              case "triageToTicket" :
+                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+                updatedText = "";
+                callToCreateTicket(senderId, contexts);
+                break;
+              case "CreateTicket" :
+                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+                updatedText = "";
+                createTicket(senderId, message);
+                break;
+              case "GetTicketStatus":
+                updatedText = "";
+                callToGetTicketStatus(senderId,  nluData.result.parameters.Ticket);
+                //sendMessage(senderId,{text:"Getting Ticket Status"});
+                //sendMessage(senderId,{text:"Getting Ticket Status"});
+                break;
+              case "ChangeTicketStatus":
+                updatedText = "";
+                callToUpdateTicketStatus(senderId, nluData.result.parameters.TicketStatus, nluData.result.parameters.Ticket);
+                //sendMessage(senderId,{text:"Changing Ticket Status"});
+                break;
+              case "smalltalk.agent" :
+              case "support.live_person" :            
+              case "smalltalk.agent.annoying" :
+              case "smalltalk.agent.bad" :
+              case "smalltalk.agent.good" :            
+                //respondAccordingToTone(senderId, message);
+                updatedText = "";
+                sendMessage(senderId, {text:nluData.result.fulfillment.speech});
+                break;
+              case "ExtractTicketNo":              
+                //sendMessage(senderId,{text:"extracting ticket number"});
+                updatedText = "";
+                getContext(senderId,contexts);
+                break;
+              case "ConfirmTicket":
+                //sendMessage(senderId,{text:"confirming ticket"});
+                //sendMessage(senderId,{text:"contexts :"+body});
+                updatedText = "";
+                getContext(senderId,contexts);
+                break;
+              default:
+                //respondAccordingToTone(senderId,message);
+                updatedText = "";
+                sendMessage(senderId, {text:nluData.result.fulfillment.speech});
+                break;
+            }
           }
         }
+        else
+        {
+          sendMessage(senderId, {text:"No Action returned from NLU"});
+        }
+
+        
         //sendMessage(senderId,{text:nluData.result.action});
       }
     });
