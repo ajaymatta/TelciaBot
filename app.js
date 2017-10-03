@@ -62,7 +62,7 @@ app.post("/webhook", function (req, res) {
 });
 
 
-// Email Converstaion via UIPath
+// Server index page
 app.get("/email", function (req, res) {
   
   var msg = req.query.message;
@@ -222,8 +222,10 @@ function convertAudioToText(senderId, audioLink){
   });
 }
 
+
+
 function getNLUforCTA(senderId,message){
-  console.log("came into getNLUforCTA");
+  console.log("came into getNLUforCTA for message :"+message);
   var sessionId = null;
   
   if(senderId.indexOf("@") !== -1)
@@ -240,16 +242,17 @@ function getNLUforCTA(senderId,message){
       },
       method: "GET"
     }, function(error, response, body) {
+      console.log("NLU Response : \n" + JSON.stringify(response));
+
       if (error) {
         sendMessage(senderId,{text:"Error from API.ai"});
       } else {
-        nluData = JSON.parse(body);
-        console.log("NLU Response : \n" + body);
+        nluData = JSON.parse(body);        
 
-        if(nluData.result!==null){
+        if(nluData.result!==null && response.statusCode===200){
           var nluAction = nluData.result.action;
           var contexts = nluData.result.contexts;
-          console.log("nluAction value is" + nluAction);
+          console.log("nluAction value : " + nluAction);
           
           if(nluAction){
             switch(nluAction){
@@ -333,10 +336,13 @@ function getNLUforCTA(senderId,message){
                 break;
             }
           }
+          else{
+            sendMessage(senderId, {text:"No Action returned from NLU"});   
+          }
         }
         else
         {
-          sendMessage(senderId, {text:"No Action returned from NLU"});
+          sendMessage(senderId, {text:"No Response returned from NLU"});
         }
 
         
@@ -731,9 +737,13 @@ function respondAccordingToTone(senderId,receivedText){
   tone_analyzer.tone({ text: receivedText },
     function(err, tone) {
       if (err)
+      {
+        console.log ("Error Respoinse from Watson :"+err);
         sendMessage(senderId, {text: "Error Accessing Watson :"+err});
+      }
       else{
         //sendMessage(senderId, {text: "Tone Received."});
+        console.log ("Watson ToneAnalyzer Respoinse :"+JSON.stringify(tone));
         var emoTones = tone.document_tone.tone_categories[0].tones;
         //var responded = false;
         var maxValue = 0;
@@ -744,7 +754,7 @@ function respondAccordingToTone(senderId,receivedText){
           }
         }
     
-      //if(!responded) {
+      
         if (maxValue) {
           console.log("Sentiment :"+maxValue.tone_id);
           switch(maxValue.tone_id){
@@ -766,15 +776,15 @@ function respondAccordingToTone(senderId,receivedText){
         } else {
           updatedText = "";
         }
-      //}
       
-      console.log ("Updated Text value is:" + updatedText);
-      if (maxValue.tone_id != "anger") {
-        getNLUforCTA(senderId,receivedText.trim());
-      } else {
-        sendMessage(senderId, {text:""});
+      
+        console.log ("Updated Text value is:" + updatedText);
+        if (maxValue.tone_id != "anger") {
+          getNLUforCTA(senderId,receivedText.trim());
+        } else {
+          sendMessage(senderId, {text:""});
+        }
       }
-    }
   });
 }
 
