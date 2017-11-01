@@ -5,7 +5,7 @@ var htmlToText = require('html-to-text');
 var mongoose = require('mongoose');
 var validation = require("validator");
 var striptags = require('striptags');
-var resToUiPath = null;
+
 
 //Connecting to DB
 mongoose.connect(process.env.MONGODB_URI);
@@ -18,9 +18,10 @@ app.use(bodyParser.json());
 app.listen((process.env.PORT || 5000));
 
 var updatedText = "";
+var resToUiPath = null;
 var nluData = "";
 var userArray = [];
-var currentUser = {};
+var sourceChannel = "FACEBOOK";
 
 
 // Server index page
@@ -42,20 +43,22 @@ app.get("/webhook", function (req, res) {
 
 // All callbacks for Messenger will be POST-ed here
 app.post("/webhook", function (req, res) {
-  console.log("came to first post webhook");
+  console.log("Invoked webhook Post Method");
   // Make sure this is a page subscription
   if (req.body.object == "page") {
     // Iterate over each entry
     // There may be multiple entries if batched
-    HubSpot_Integration();
+    
     req.body.entry.forEach(function(entry) {
       // Iterate over each messaging event
       entry.messaging.forEach(function(event) {
         if (event.postback) {
           console.log("calling processPostback");
+          HubSpot_Integration();
           processPostback(event);
         }
         else if (event.message) {
+          HubSpot_Integration();
           processMessage(event);
         }
       });
@@ -66,12 +69,12 @@ app.post("/webhook", function (req, res) {
 });
 
 
-// Server index page
-app.get("/email", function (req, res) {
-  
+// To serve My Account, GMail and Alexa
+app.get("/email", function (req, res) {  
   var msg = req.query.message;
   var senderId = req.query.senderId;
-  console.log("From : "+senderId + " \n Message : \n"+msg);
+  sourceChannel = req.query.sourceChannel;
+  console.log("Received message : \n"+msg+" \n From : "+senderId+" \n Via : "+sourceChannel);
   var formattedMsg  = striptags(msg.trim());  
   updatedText = "";  
   resToUiPath=res;
@@ -83,7 +86,7 @@ app.get("/email", function (req, res) {
 
 
 function processPostback(event) {
-  console.log("came into processPostback");
+  console.log("Inovked processPostback");
   var senderId = event.sender.id;
   var payload = event.postback.payload; 
 
@@ -127,9 +130,9 @@ function sendMessage(recipientId, message) {
   //console.log("the message is" + message.text);
   message.text = updatedText +"\n" + message.text;
   console.log("the message is" + message.text);
-  findCurrentUser(recipientId);
   
-  insertIntoDatebase(currentUser.vid, message, nluData);
+  
+  insertIntoDatebase(findCurrentUser(recipientId), message, nluData);
 
   if(recipientId.indexOf("@") !== -1)
   {
@@ -154,32 +157,26 @@ function sendMessage(recipientId, message) {
 
 }
 
-function findCurrentUser (userInfo) {
-  if (userInfo.includes("@")) {
-    for (var i = 0; i < 2; i++) {
-      if (userArray[i].email == userInfo) {
+function findCurrentUser (userId) {
+  if (userId.includes("@")) {
+    for (var i = 0; i < userArray.length; i++) {
+      if (userArray[i].email === userId) {
           currentUser = userArray[i];
-          break;
+          return userArray[i].vid;
       }
     }
   } else {
-     if (userInfo > 10000000) {      
-      for (var i = 0; i < 2; i++) {
-        if (userArray[i].fb_messenger_sender_id == userInfo) {
+     if (!isNaN(userId)) {      
+      for (var i = 0; i < userArray.length; i++) {
+        if (userArray[i].fb_messenger_sender_id === userId) {
           currentUser = userArray[i];
-          break;
-        }
-      }
-    } else if (userInfo<=10000000) {
-      for (var i = 0; i < 2; i++) {
-        if (userArray[i].myAccount_id == userInfo) {
-          currentUser = userArray[i];
-          break;
+          return userArray[i].vid;
         }
       }
     }
   }
   console.log("currentUser:" + JSON.stringify(currentUser)); 
+  return null;
 }
 
 function processMessage(event){
@@ -224,41 +221,28 @@ function HubSpot_Integration() {
             //sendMessage(senderId,{text:"Error Converting Speech to Text"});
           }
           else{
-            var extractedText = hubspotBody;
-            console.log("HubSpot Data is:" + extractedText.contacts);
-            userObjectCreation(extractedText);
+            var hubspotResult = JSON.parse(hubspotBody);
+            console.log("HubSpot Data is:" + JSON.stringify(hubspotResult.contacts));
+            userObjectCreation(hubspotResult.contacts);
             //var formattedMsg = extractedText.trim();
             //respondAccordingToTone(senderId,formattedMsg);
           }            
       });
 }
 
-function userObjectCreation(extractedText) {
+function userObjectCreation(contacts) {
   userArray = [];
-  var user = {};
-  user.vid = "101";
-  user.firstname="Ajay Kumar";
-  user.lastname="Matta";
-  user.email="ajaykumar.mak@gmail.com";
-  user.fb_messenger_sender_id = "1387157994733137";
-  userArray.push(user);
-  console.log("userArray is:" + JSON.stringify(userArray));
-  user = {};
-  user.vid="102";
-  user.firstname="Loganathan";
-  user.lastname="Murugesan";
-  user.email="cresloga@gmail.com";
-  user.fb_messenger_sender_id="1387157994733138";
-  userArray.push(user);
-  /*for (var i = 0; i < 4; i++) {
+  for(var i=0; i<contacts.length; i++){
     var user = {};
-    user.vid = extractedText.contacts[i].vid;
-    user.firstname = extractedText.contacts[i].properties.firstname;
-    user.lastname = extractedText.contacts[i].properties.lastname;
-    user.email = extractedText.contacts[i].properties.email;
-    userArray.push(user);
-  }*/
+    user.vid = contacts[i].vid;
+    if(contacts[i].properties && contacts[i].properties.firstname)  user.firstname=contacts[i].properties.firstname.value;
+    if(contacts[i].properties && contacts[i].properties.lastname)  user.lastname=contacts[i].properties.lastname.value;
+    if(contacts[i].properties && contacts[i].properties.email)  user.email=contacts[i].properties.email.value;
+    if(contacts[i].properties && contacts[i].properties.fb_messenger_sender_id)  user.fb_messenger_sender_id = contacts[i].properties.fb_messenger_sender_id.value;
+    userArray.push(user);    
+  }
   console.log("userArray is:" + JSON.stringify(userArray));
+
 }
 
 
