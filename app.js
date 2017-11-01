@@ -19,6 +19,9 @@ app.listen((process.env.PORT || 5000));
 
 var updatedText = "";
 var nluData = "";
+var userArray = [];
+var currentUser = {};
+
 
 // Server index page
 app.get("/", function (req, res) {
@@ -44,6 +47,7 @@ app.post("/webhook", function (req, res) {
   if (req.body.object == "page") {
     // Iterate over each entry
     // There may be multiple entries if batched
+    HubSpot_Integration();
     req.body.entry.forEach(function(entry) {
       // Iterate over each messaging event
       entry.messaging.forEach(function(event) {
@@ -123,8 +127,9 @@ function sendMessage(recipientId, message) {
   //console.log("the message is" + message.text);
   message.text = updatedText +"\n" + message.text;
   console.log("the message is" + message.text);
-
-  insertIntoDatebase(recipientId, message, nluData);
+  findCurrentUser(recipientId);
+  
+  insertIntoDatebase(currentUser.vid, message, nluData);
 
   if(recipientId.indexOf("@") !== -1)
   {
@@ -149,7 +154,33 @@ function sendMessage(recipientId, message) {
 
 }
 
-
+function findCurrentUser (userInfo) {
+  if (userInfo.includes("@")) {
+    for (var i = 0; i < 2; i++) {
+      if (userArray[i].email == userInfo) {
+          currentUser = userArray[i];
+          break;
+      }
+    }
+  } else {
+     if (userInfo > 10000000) {      
+      for (var i = 0; i < 2; i++) {
+        if (userArray[i].fb_messenger_sender_id == userInfo) {
+          currentUser = userArray[i];
+          break;
+        }
+      }
+    } else if (userInfo<=10000000) {
+      for (var i = 0; i < 2; i++) {
+        if (userArray[i].myAccount_id == userInfo) {
+          currentUser = userArray[i];
+          break;
+        }
+      }
+    }
+  }
+  console.log("currentUser:" + JSON.stringify(currentUser)); 
+}
 
 function processMessage(event){
   console.log("came into processMessage");
@@ -168,6 +199,8 @@ function processMessage(event){
         //sendMessage(senderId, {text: formattedMsg});
         respondAccordingToTone(senderId,formattedMsg);
         //getNLUforCTA(senderId,formattedMsg);
+        //HubSpot_Integration();
+        //crmGettingContactByValue("fb", 1387157994733137);
       }
       else if (message.attachments){
         if (message.attachments[0].type==="audio"){
@@ -179,6 +212,81 @@ function processMessage(event){
       }
   }
 }
+
+function HubSpot_Integration() {
+  console.log("HubSpot Integration");
+  request({
+        url: "https://api.hubapi.com/contacts/v1/lists/all/contacts/all?hapikey="+process.env.HAPIKey+"&property=firstname&property=lastname&property=email&property=fb_messenger_sender_id",
+        method: "GET",
+        }, function(hubspotError, hubspotResponse, hubspotBody) {
+          if (hubspotError) {
+            console.log("Error Getting details from HubSpot: " + hubspotError);
+            //sendMessage(senderId,{text:"Error Converting Speech to Text"});
+          }
+          else{
+            var extractedText = hubspotBody;
+            console.log("HubSpot Data is:" + extractedText.contacts);
+            userObjectCreation(extractedText);
+            //var formattedMsg = extractedText.trim();
+            //respondAccordingToTone(senderId,formattedMsg);
+          }            
+      });
+}
+
+function userObjectCreation(extractedText) {
+  userArray = [];
+  var user = {};
+  user.vid = "101";
+  user.firstname="Ajay Kumar";
+  user.lastname="Matta";
+  user.email="ajaykumar.mak@gmail.com";
+  user.fb_messenger_sender_id = "1387157994733137";
+  userArray.push(user);
+  console.log("userArray is:" + JSON.stringify(userArray));
+  user = {};
+  user.vid="102";
+  user.firstname="Loganathan";
+  user.lastname="Murugesan";
+  user.email="cresloga@gmail.com";
+  user.fb_messenger_sender_id="1387157994733138";
+  userArray.push(user);
+  /*for (var i = 0; i < 4; i++) {
+    var user = {};
+    user.vid = extractedText.contacts[i].vid;
+    user.firstname = extractedText.contacts[i].properties.firstname;
+    user.lastname = extractedText.contacts[i].properties.lastname;
+    user.email = extractedText.contacts[i].properties.email;
+    userArray.push(user);
+  }*/
+  console.log("userArray is:" + JSON.stringify(userArray));
+}
+
+
+/*Ajay: Not possible to search with custom api - https://integrate.hubspot.com/t/search-with-custom-properties/3941
+function crmGettingContactByValue(source, value) {
+  console.log("insidecrmGettingContactByValue");
+  var constructed_url= "";
+  if (source="fb") {
+    constructed_url = "https://api.hubapi.com/contacts/v1/search/fb_messenger_sender_id?q=" + value + "&hapikey="+process.env.HAPIKey;
+  }
+  console.log ("constructed_url:" + constructed_url);
+  request({
+        url: constructed_url,
+        method: "GET",
+        }, function(hubspotError, hubspotResponse, hubspotBody) {
+          if (hubspotError) {
+            console.log("Error Getting details from crm: " + hubspotError);
+            //sendMessage(senderId,{text:"Error Converting Speech to Text"});
+          }
+          else{
+            var extractedText = hubspotBody;
+            console.log("crm values is:" + extractedText);
+            //var formattedMsg = extractedText.trim();
+            //respondAccordingToTone(senderId,formattedMsg);
+          }   
+  });         
+} */
+
 
 function convertAudioToText(senderId, audioLink){
   console.log("came into convertAudioToText");
@@ -738,12 +846,12 @@ function respondAccordingToTone(senderId,receivedText){
     function(err, tone) {
       if (err)
       {
-        console.log ("Error Respoinse from Watson :"+err);
+        console.log ("Error Response from Watson :"+err);
         sendMessage(senderId, {text: "Error Accessing Watson :"+err});
       }
       else{
         //sendMessage(senderId, {text: "Tone Received."});
-        console.log ("Watson ToneAnalyzer Respoinse :"+JSON.stringify(tone));
+        console.log ("Watson ToneAnalyzer Response :"+JSON.stringify(tone));
         var emoTones = tone.document_tone.tone_categories[0].tones;
         //var responded = false;
         var maxValue = 0;
