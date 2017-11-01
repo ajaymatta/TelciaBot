@@ -21,6 +21,7 @@ var updatedText = "";
 var resToUiPath = null;
 var nluData = "";
 var userArray = [];
+var currentUser={};
 var sourceChannel = "FACEBOOK";
 
 
@@ -54,10 +55,12 @@ app.post("/webhook", function (req, res) {
       entry.messaging.forEach(function(event) {
         if (event.postback) {
           console.log("calling processPostback");
+          sourceChannel="FACEBOOK";
           HubSpot_Integration();
           processPostback(event);
         }
         else if (event.message) {
+          sourceChannel="FACEBOOK";
           HubSpot_Integration();
           processMessage(event);
         }
@@ -74,6 +77,7 @@ app.get("/email", function (req, res) {
   var msg = req.query.message;
   var senderId = req.query.senderId;
   sourceChannel = req.query.sourceChannel;
+  HubSpot_Integration();
   console.log("Received message : \n"+msg+" \n From : "+senderId+" \n Via : "+sourceChannel);
   var formattedMsg  = striptags(msg.trim());  
   updatedText = "";  
@@ -132,7 +136,7 @@ function sendMessage(recipientId, message) {
   console.log("the message is" + message.text);
   
   
-  insertIntoDatebase(findCurrentUser(recipientId), message, nluData);
+  insertIntoDatebase(findCurrentUser(recipientId).vid, message, nluData);
 
   if(recipientId.indexOf("@") !== -1)
   {
@@ -162,7 +166,7 @@ function findCurrentUser (userId) {
     for (var i = 0; i < userArray.length; i++) {
       if (userArray[i].email === userId) {
           currentUser = userArray[i];
-          return userArray[i].vid;
+          return currentUser;
       }
     }
   } else {
@@ -170,7 +174,7 @@ function findCurrentUser (userId) {
       for (var i = 0; i < userArray.length; i++) {
         if (userArray[i].fb_messenger_sender_id === userId) {
           currentUser = userArray[i];
-          return userArray[i].vid;
+          return currentUser;
         }
       }
     }
@@ -185,7 +189,7 @@ function processMessage(event){
       var message = event.message;
       var senderId = event.sender.id;
       //console.log("Event is:" + event);
-      console.log("Received message from senderId: " + senderId);
+      console.log("Received message from senderId: " + senderId+" via "+sourceChannel);
       console.log("Message is: " + JSON.stringify(message));
       var responseMsg="";
 
