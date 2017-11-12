@@ -140,7 +140,7 @@ function sendMessage(recipientId, message) {
 
   if(recipientId.indexOf("@") !== -1)
   {
-    resToUiPath.status(200).send(message.text);
+    if(resToUiPath) resToUiPath.status(200).send(message.text);
   }
   else{
       request({
