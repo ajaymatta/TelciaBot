@@ -164,7 +164,7 @@ function sendMessage(recipientId, message) {
 function findCurrentUser (userId) {
   if (userId.includes("@")) {
     for (var i = 0; i < userArray.length; i++) {
-      if (userArray[i].email === userId) {
+      if (userId.includes(userArray[i].email)) {
           currentUser = userArray[i];
           return currentUser;
       }
