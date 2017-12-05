@@ -49,25 +49,26 @@ app.post("/webhook", function (req, res) {
   if (req.body.object == "page") {
     // Iterate over each entry
     // There may be multiple entries if batched
-    
-    req.body.entry.forEach(function(entry) {
+    HubSpot_Integration(function() {
+      console.log("executing callback");
+      req.body.entry.forEach(function(entry) {
       // Iterate over each messaging event
       entry.messaging.forEach(function(event) {
         if (event.postback) {
           console.log("calling processPostback");
           sourceChannel="FACEBOOK";
-          HubSpot_Integration();
+          //HubSpot_Integration();
           processPostback(event);
         }
         else if (event.message) {
           sourceChannel="FACEBOOK";
-          HubSpot_Integration();
+          //HubSpot_Integration();
           processMessage(event);
         }
       });
     });
-
     res.sendStatus(200);
+    });    
   }
 });
 
@@ -77,15 +78,15 @@ app.get("/email", function (req, res) {
   var msg = req.query.message;
   var senderId = req.query.senderId;
   sourceChannel = req.query.sourceChannel;
-  HubSpot_Integration();
-  console.log("Received message : \n"+msg+" \n From : "+senderId+" \n Via : "+sourceChannel);
-  var formattedMsg  = striptags(msg.trim());  
-  updatedText = "";  
-  resToUiPath=res;
-  console.log("From : "+senderId + " Message : "+formattedMsg);
-  //sendMessage(senderId, {text: formattedMsg});
-  respondAccordingToTone(senderId,formattedMsg);
-  
+  HubSpot_Integration(function() {
+    console.log("Received message : \n"+msg+" \n From : "+senderId+" \n Via : "+sourceChannel);
+    var formattedMsg  = striptags(msg.trim());  
+    updatedText = "";  
+    resToUiPath=res;
+    console.log("From : "+senderId + " Message : "+formattedMsg);
+    //sendMessage(senderId, {text: formattedMsg});
+    respondAccordingToTone(findCurrentUser(senderId).vid.toString(),formattedMsg);
+  });
 });
 
 
@@ -136,13 +137,15 @@ function sendMessage(recipientId, message) {
   console.log("the message is" + message.text);
   
   
-  insertIntoDatebase(findCurrentUser(recipientId).vid, message, nluData);
+  insertIntoDatebase(recipientId, message, nluData);
 
   if(recipientId.indexOf("@") !== -1)
   {
-    if(resToUiPath) resToUiPath.status(200).send(message.text);
+    resToUiPath.status(200).send(message.text);
   }
   else{
+      recipientUser = findUserfromVid(recipientId);
+      recipientId = recipientUser.fb_messenger_sender_id;
       request({
         url: "https://graph.facebook.com/v2.6/me/messages",
         qs: {access_token: process.env.PAGE_ACCESS_TOKEN},
@@ -157,14 +160,12 @@ function sendMessage(recipientId, message) {
         }
       });  
   }
-
-
 }
 
 function findCurrentUser (userId) {
   if (userId.includes("@")) {
     for (var i = 0; i < userArray.length; i++) {
-      if (userId.includes(userArray[i].email)) {
+      if (userArray[i].email === userId) {
           currentUser = userArray[i];
           return currentUser;
       }
@@ -183,38 +184,50 @@ function findCurrentUser (userId) {
   return null;
 }
 
+function findUserfromVid (userId) {
+  console.log("came here and user id is :"+userId)
+  if (!isNaN(parseInt(userId))) {      
+    for (var i = 0; i < userArray.length; i++) {
+      if (userArray[i].vid == userId) {
+          currentUser = userArray[i];
+          console.log("currentUser:" + JSON.stringify(currentUser));
+          return currentUser;
+      }
+    }
+  }
+}  
+
 function processMessage(event){
   console.log("came into processMessage");
   if (!event.message.is_echo) {
-      var message = event.message;
-      var senderId = event.sender.id;
-      //console.log("Event is:" + event);
-      console.log("Received message from senderId: " + senderId+" via "+sourceChannel);
-      console.log("Message is: " + JSON.stringify(message));
-      var responseMsg="";
+    var message = event.message;
+    var senderId = event.sender.id;
+    //console.log("Event is:" + event);
+    console.log("Received message from senderId: " + senderId+" via "+sourceChannel);
+    console.log("Message is: " + JSON.stringify(message));
+    var responseMsg="";
 
-      // You may get a text or attachment but not both
-      if (message.text) {
-        var formattedMsg = message.text.trim();
-        updatedText = "";
-        //sendMessage(senderId, {text: formattedMsg});
-        respondAccordingToTone(senderId,formattedMsg);
-        //getNLUforCTA(senderId,formattedMsg);
-        //HubSpot_Integration();
-        //crmGettingContactByValue("fb", 1387157994733137);
-      }
-      else if (message.attachments){
-        if (message.attachments[0].type==="audio"){
-          var audioLink =   message.attachments[0].payload.url;
-          console.log("Audio URL: " + audioLink);
-          convertAudioToText(senderId,audioLink);
-        }
-        
-      }
+    // You may get a text or attachment but not both
+    if (message.text) {
+      var formattedMsg = message.text.trim();
+      updatedText = "";
+      //sendMessage(senderId, {text: formattedMsg});
+      respondAccordingToTone(findCurrentUser(senderId).vid.toString(),formattedMsg);
+      //getNLUforCTA(senderId,formattedMsg);
+      //HubSpot_Integration();
+      //crmGettingContactByValue("fb", 1387157994733137);
+    }
+    else if (message.attachments){
+      if (message.attachments[0].type==="audio"){
+        var audioLink =   message.attachments[0].payload.url;
+        console.log("Audio URL: " + audioLink);
+        convertAudioToText(senderId,audioLink);
+      }      
+    }
   }
 }
 
-function HubSpot_Integration() {
+function HubSpot_Integration(callback) {
   console.log("HubSpot Integration");
   request({
         url: "https://api.hubapi.com/contacts/v1/lists/all/contacts/all?hapikey="+process.env.HAPIKey+"&property=firstname&property=lastname&property=email&property=fb_messenger_sender_id",
@@ -228,6 +241,7 @@ function HubSpot_Integration() {
             var hubspotResult = JSON.parse(hubspotBody);
             console.log("HubSpot Data is:" + JSON.stringify(hubspotResult.contacts));
             userObjectCreation(hubspotResult.contacts);
+            callback();
             //var formattedMsg = extractedText.trim();
             //respondAccordingToTone(senderId,formattedMsg);
           }            
@@ -322,9 +336,10 @@ function convertAudioToText(senderId, audioLink){
 
 function getNLUforCTA(senderId,message){
   console.log("came into getNLUforCTA for message :"+message);
+  console.log("Sender id is:"+senderId);
   var sessionId = null;
   
-  if(senderId.indexOf("@") !== -1)
+  if(senderId.indexOf("@") != -1)
   {
     sessionId="123456789";
   }
