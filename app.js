@@ -22,7 +22,6 @@ var updatedText = "";
 var resToUiPath = null;
 var nluData = "";
 var userArray = [];
-var currentUser={};
 var sourceChannel = "FACEBOOK";
 
 
@@ -30,6 +29,7 @@ var sourceChannel = "FACEBOOK";
 app.get("/", function (req, res) {
   res.send("Deployed!");
 });
+
 
 // Facebook Webhook
 // Used for verification
@@ -43,6 +43,28 @@ app.get("/webhook", function (req, res) {
   }
 });
 
+
+// To serve My Account, GMail and Alexa
+app.get("/email", function (req, res) {  
+  var msg = req.query.message;
+  var senderId = req.query.senderId;
+  sourceChannel = req.query.sourceChannel;
+
+  console.log("Received message : \n"+msg+" \n From : "+senderId+" \n Via : "+sourceChannel);
+  var formattedMsg  = striptags(msg.trim());    
+  console.log("From : "+senderId + " Formatted Message : "+formattedMsg);
+
+  updatedText = "";  
+  resToUiPath=res;
+  
+  
+  HubSpot_Integration(function() {    
+    //sendMessage(senderId, {text: formattedMsg});
+    respondAccordingToTone(findCurrentUser(senderId).vid.toString(),formattedMsg);
+  });
+});
+
+
 // All callbacks for Messenger will be POST-ed here
 app.post("/webhook", function (req, res) {
   console.log("Invoked webhook Post Method");
@@ -50,45 +72,31 @@ app.post("/webhook", function (req, res) {
   if (req.body.object == "page") {
     // Iterate over each entry
     // There may be multiple entries if batched
-    HubSpot_Integration(function() {
+    HubSpot_Integration( function() {
       console.log("executing callback");
       req.body.entry.forEach(function(entry) {
       // Iterate over each messaging event
-      entry.messaging.forEach(function(event) {
-        if (event.postback) {
-          console.log("calling processPostback");
-          sourceChannel="FACEBOOK";
-          //HubSpot_Integration();
-          processPostback(event);
-        }
-        else if (event.message) {
-          sourceChannel="FACEBOOK";
-          //HubSpot_Integration();
-          processMessage(event);
-        }
+        entry.messaging.forEach(function(event) {
+          if (event.postback) {
+            console.log("calling processPostback");
+            sourceChannel="FACEBOOK";
+            //HubSpot_Integration();
+            processPostback(event);
+          }
+          else if (event.message) {
+            sourceChannel="FACEBOOK";
+            //HubSpot_Integration();
+            processMessage(event);
+          }
+        });
       });
-    });
     res.sendStatus(200);
     });    
   }
 });
 
 
-// To serve My Account, GMail and Alexa
-app.get("/email", function (req, res) {  
-  var msg = req.query.message;
-  var senderId = req.query.senderId;
-  sourceChannel = req.query.sourceChannel;
-  HubSpot_Integration(function() {
-    console.log("Received message : \n"+msg+" \n From : "+senderId+" \n Via : "+sourceChannel);
-    var formattedMsg  = striptags(msg.trim());  
-    updatedText = "";  
-    resToUiPath=res;
-    console.log("From : "+senderId + " Message : "+formattedMsg);
-    //sendMessage(senderId, {text: formattedMsg});
-    respondAccordingToTone(findCurrentUser(senderId).vid.toString(),formattedMsg);
-  });
-});
+
 
 
 function processPostback(event) {
@@ -132,7 +140,7 @@ function greetingMsg(senderId){
 
 // sends message to user
 function sendMessage(recipientId, message) {
-  console.log("came into sendMessage");
+  console.log("Invoked sendMessage");
   //console.log("the message is" + message.text);
   message.text = updatedText +"\n" + message.text;
   console.log("the message is" + message.text);
@@ -142,6 +150,8 @@ function sendMessage(recipientId, message) {
 
   if(sourceChannel != "FACEBOOK")
   {
+    console.log("response sent? :"+resToUiPath.headersSent);
+    if (resToUiPath.headersSent) return;
     resToUiPath.status(200).send(message.text);
   }
   else{
@@ -164,6 +174,7 @@ function sendMessage(recipientId, message) {
 }
 
 function findCurrentUser (userId) {
+  var currentUser={};
   if (userId.includes("@")) {
     for (var i = 0; i < userArray.length; i++) {
       if (userId.includes(userArray[i].email)) {
@@ -189,8 +200,8 @@ function findUserfromVid (userId) {
   console.log("came here and user id is :"+userId)
   if (!isNaN(parseInt(userId))) {      
     for (var i = 0; i < userArray.length; i++) {
-      if (userArray[i].vid == userId) {
-          currentUser = userArray[i];
+      if (userArray[i].vid == userId) {        
+          var currentUser = userArray[i];
           console.log("currentUser:" + JSON.stringify(currentUser));
           return currentUser;
       }
@@ -199,7 +210,7 @@ function findUserfromVid (userId) {
 }  
 
 function processMessage(event){
-  console.log("came into processMessage");
+  console.log("Invoked processMessage");
   if (!event.message.is_echo) {
     var message = event.message;
     var senderId = event.sender.id;
@@ -211,12 +222,8 @@ function processMessage(event){
     // You may get a text or attachment but not both
     if (message.text) {
       var formattedMsg = message.text.trim();
-      updatedText = "";
-      //sendMessage(senderId, {text: formattedMsg});
-      respondAccordingToTone(findCurrentUser(senderId).vid.toString(),formattedMsg);
-      //getNLUforCTA(senderId,formattedMsg);
-      //HubSpot_Integration();
-      //crmGettingContactByValue("fb", 1387157994733137);
+      updatedText = "";      
+      respondAccordingToTone(findCurrentUser(senderId).vid.toString(),formattedMsg);      
     }
     else if (message.attachments){
       if (message.attachments[0].type==="audio"){
@@ -234,6 +241,7 @@ function HubSpot_Integration(callback) {
         url: "https://api.hubapi.com/contacts/v1/lists/all/contacts/all?hapikey="+process.env.HAPIKey+"&property=firstname&property=lastname&property=email&property=fb_messenger_sender_id",
         method: "GET",
         }, function(hubspotError, hubspotResponse, hubspotBody) {
+          console.log("Hubspot Response : "+hubspotBody);
           if (hubspotError) {
             console.log("Error Getting details from HubSpot: " + hubspotError);
             //sendMessage(senderId,{text:"Error Converting Speech to Text"});
@@ -242,9 +250,7 @@ function HubSpot_Integration(callback) {
             var hubspotResult = JSON.parse(hubspotBody);
             console.log("HubSpot Data is:" + JSON.stringify(hubspotResult.contacts));
             userObjectCreation(hubspotResult.contacts);
-            callback();
-            //var formattedMsg = extractedText.trim();
-            //respondAccordingToTone(senderId,formattedMsg);
+            callback();            
           }            
       });
 }
@@ -265,34 +271,8 @@ function userObjectCreation(contacts) {
 }
 
 
-/*Ajay: Not possible to search with custom api - https://integrate.hubspot.com/t/search-with-custom-properties/3941
-function crmGettingContactByValue(source, value) {
-  console.log("insidecrmGettingContactByValue");
-  var constructed_url= "";
-  if (source="fb") {
-    constructed_url = "https://api.hubapi.com/contacts/v1/search/fb_messenger_sender_id?q=" + value + "&hapikey="+process.env.HAPIKey;
-  }
-  console.log ("constructed_url:" + constructed_url);
-  request({
-        url: constructed_url,
-        method: "GET",
-        }, function(hubspotError, hubspotResponse, hubspotBody) {
-          if (hubspotError) {
-            console.log("Error Getting details from crm: " + hubspotError);
-            //sendMessage(senderId,{text:"Error Converting Speech to Text"});
-          }
-          else{
-            var extractedText = hubspotBody;
-            console.log("crm values is:" + extractedText);
-            //var formattedMsg = extractedText.trim();
-            //respondAccordingToTone(senderId,formattedMsg);
-          }   
-  });         
-} */
-
-
 function convertAudioToText(senderId, audioLink){
-  console.log("came into convertAudioToText");
+  console.log("Invoked convertAudioToText");
   request({
     url: "https://us-central1-sublime-calling-165813.cloudfunctions.net/convertAudioFormat",
     method: "POST",
@@ -304,8 +284,7 @@ function convertAudioToText(senderId, audioLink){
       console.log("Error Converting Audioclip Format: " + error);
       sendMessage(senderId,{text:"Error Converting Audioclip Format"});
     }
-    else{
-      //var ticket = JSON.parse(body);
+    else{      
       console.log("Converted Audioclip Format: " + body);
       var convertedAudioLink = body.opAudioLink;
       console.log("Converted Audioclip URL: " + convertedAudioLink);
@@ -325,7 +304,7 @@ function convertAudioToText(senderId, audioLink){
             var extractedText = spchBody.text;
             console.log("Converted Audio to Text: " + extractedText);
             var formattedMsg = extractedText.trim();
-            respondAccordingToTone(senderId,formattedMsg);
+            respondAccordingToTone(findCurrentUser(senderId).vid.toString(),formattedMsg);
           }
 
       });
@@ -336,17 +315,13 @@ function convertAudioToText(senderId, audioLink){
 
 
 function getNLUforCTA(senderId,message){
-  console.log("came into getNLUforCTA for message :"+message);
+  console.log("Invoked getNLUforCTA for message :"+message);
   console.log("Sender id is:"+senderId);
   var sessionId = null;
   
-  if(senderId.indexOf("@") != -1)
-  {
-    sessionId="123456789";
-  }
-  else{
-    sessionId=senderId;
-  }
+  
+  sessionId=senderId;
+  
    request({
       url: "https://api.api.ai/v1/query?v=20150910&lang=en&sessionId="+sessionId+"&query="+message,
       headers: {
@@ -368,81 +343,61 @@ function getNLUforCTA(senderId,message){
           
           if(nluAction){
             switch(nluAction){
-              case "triageBBIssues" :
-                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+              case "triageBBIssues" :                
                 updatedText = "";
                 sendMessage(senderId,{text:nluData.result.fulfillment.speech});
                 break;
-              case "BBIssues.BBIssues-no":
-                //updatedText = "finally came here";
-                //createTicket(senderId, message);
-                getInfoFromDatabase(senderId, "triageBBIssues");
-                //createTicket(senderId, msg);
+              case "BBIssues.BBIssues-no":                
+                getInfoFromDatabase(senderId, "triageBBIssues");                
                 break;
-              case "BBIssues.BBIssues-yes" :
-                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+              case "BBIssues.BBIssues-yes" :                
                 updatedText = "";
                 sendMessage(senderId,{text:nluData.result.fulfillment.speech});
                 break;  
-              case "triageWirelessIssues" :
-                //sendMessage(senderId,{text:"Suggest Creating Ticket"}); 
+              case "triageWirelessIssues" :                
                 updatedText = ""; 
                 sendMessage(senderId,{text:nluData.result.fulfillment.speech});
                 break;
-              case "MobileDataIssues.MobileDataIssues-no":
-                //updatedText = "finally came here 2";
-                //createTicket(senderId, message);
-                getInfoFromDatabase(senderId, "triageWirelessIssues");
-                //createTicket(senderId, msg);
+              case "MobileDataIssues.MobileDataIssues-no":                
+                getInfoFromDatabase(senderId, "triageWirelessIssues");                
                 break;  
-              case "MobileDataIssues.MobileDataIssues-yes" :
-                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+              case "MobileDataIssues.MobileDataIssues-yes" :                
                 updatedText = "";
                 sendMessage(senderId,{text:nluData.result.fulfillment.speech});
                 break;   
-              case "triageToTicket" :
-                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+              case "triageToTicket" :                
                 updatedText = "";
                 callToCreateTicket(senderId, contexts);
                 break;
-              case "CreateTicket" :
-                //sendMessage(senderId,{text:"Suggest Creating Ticket"});
+              case "CreateTicket" :                
                 updatedText = "";
                 createTicket(senderId, message);
                 break;
               case "GetTicketStatus":
                 updatedText = "";
-                callToGetTicketStatus(senderId,  nluData.result.parameters.Ticket);
-                //sendMessage(senderId,{text:"Getting Ticket Status"});
-                //sendMessage(senderId,{text:"Getting Ticket Status"});
+                callToGetTicketStatus(senderId,  nluData.result.parameters.Ticket);                
                 break;
               case "ChangeTicketStatus":
                 updatedText = "";
-                callToUpdateTicketStatus(senderId, nluData.result.parameters.TicketStatus, nluData.result.parameters.Ticket);
-                //sendMessage(senderId,{text:"Changing Ticket Status"});
+                callToUpdateTicketStatus(senderId, nluData.result.parameters.TicketStatus, nluData.result.parameters.Ticket);                
                 break;
               case "smalltalk.agent" :
               case "support.live_person" :            
               case "smalltalk.agent.annoying" :
               case "smalltalk.agent.bad" :
-              case "smalltalk.agent.good" :            
-                //respondAccordingToTone(senderId, message);
+              case "smalltalk.agent.good" :                            
                 updatedText = "";
                 sendMessage(senderId, {text:nluData.result.fulfillment.speech});
                 break;
-              case "ExtractTicketNo":              
-                //sendMessage(senderId,{text:"extracting ticket number"});
+              case "ExtractTicketNo":                              
                 updatedText = "";
                 getContext(senderId,contexts);
                 break;
-              case "ConfirmTicket":
-                //sendMessage(senderId,{text:"confirming ticket"});
-                //sendMessage(senderId,{text:"contexts :"+body});
+              case "ConfirmTicket":                
                 updatedText = "";
                 getContext(senderId,contexts);
                 break;
-              default:
-                //respondAccordingToTone(senderId,message);
+              default:                
                 updatedText = "";
                 sendMessage(senderId, {text:nluData.result.fulfillment.speech});
                 break;
@@ -456,9 +411,6 @@ function getNLUforCTA(senderId,message){
         {
           sendMessage(senderId, {text:"No Response returned from NLU"});
         }
-
-        
-        //sendMessage(senderId,{text:nluData.result.action});
       }
     });
 }
@@ -492,19 +444,16 @@ function getContext(senderId,contexts){
   for (var i=0; i<contexts.length;i++){        
 
     if(contexts[i].name==='confirmtoupdate'){
-      ticketConfirmation=true;      
-      //sendMessage(senderId,{text:"contexts confirmTicket : "+JSON.stringify(contexts[i].parameters)});
+      ticketConfirmation=true;            
     }
     if(contexts[i].name==='getticketstatus'){
       getStatus=true;
-      if(!ticketId) ticketId=contexts[i].parameters.Ticket;
-      //sendMessage(senderId,{text:"contexts getTicketStatus : "+JSON.stringify(contexts[i].parameters)});
+      if(!ticketId) ticketId=contexts[i].parameters.Ticket;      
     }
     if(contexts[i].name==='updateticketstatus'){
       updateStatus=true;
       if(!ticketId)   ticketId=contexts[i].parameters.Ticket;
-      toStatusFrmApp=contexts[i].parameters.TicketStatus;
-      //sendMessage(senderId,{text:"contexts updateTicketStatus : "+contexts[i].parameters.Ticket + "  "+toStatusFrmApp});
+      toStatusFrmApp=contexts[i].parameters.TicketStatus;      
     }
   }
 
@@ -681,8 +630,7 @@ function getMyTickets(senderId, intendingTo,toStatusToApi){
    request({
     url: "https://lychee-cake-64261.herokuapp.com/API/troubleTicket/myTT/"+senderId,
     method: "GET"
-    }, function(error, response, body) {
-      //sendMessage(senderId,{text:"Got response : "+body});
+    }, function(error, response, body) {      
     if(error){
       console.log("Error Getting Status: " + error);
       sendMessage(senderId,{text:"Error Getting your Ticket details"});
@@ -714,12 +662,12 @@ function processUpdateRequest(senderId, intendingTo,toStatusToApi,ticketsJson){
     sendMessage(senderId,{text:"Tell me about your problem."}); 
   }
   else if (noOfTickets===1){
-    //sendMessage(senderId,{text:"You have a ticket in our systems."});
+    
     if(intendingTo==='get'){             
       composeTicketStatus(senderId,ticketsJson[0]);
     }
     else if(intendingTo==='update'){            
-      //sendMessage(senderId,{text:"You have a ticket in our systems to update"});
+      
       var statusToPrint=toStatusToApi;
       if(statusToPrint==='created'){
         statusToPrint='reopened';
@@ -731,7 +679,9 @@ function processUpdateRequest(senderId, intendingTo,toStatusToApi,ticketsJson){
     }         
   }
   else if(noOfTickets>1){
-    sendMessage(senderId,{text:"You seem to have many tickets created in the system. Below are the last few tickets from you"});
+    sendMessage(senderId,{text:"You have more than one ticket in our system."});
+    sendMessage(senderId,{text:"Following are the details of last few of your tickets."});
+
     var limit = 3;
     if(noOfTickets<3){
       limit = noOfTickets;
@@ -822,10 +772,7 @@ function createTicket(senderId,receivedText){
       sendMessage(senderId,{text:"Error creating ticket"});
     }
     else{
-      //var ticket = JSON.parse(body);
       var ticketId = body.id;
-      //sendMessage(senderId,{text:body});
-      
       sendMessage(senderId,{text:"Created Ticket# "+ticketId+". Refer to this ticket for future communication on this issue."});
     }
   });
@@ -834,8 +781,7 @@ function createTicket(senderId,receivedText){
 
 function respondAccordingToTone(senderId,receivedText){
   
-  console.log ("came into respondAccordingToTone");
-  //sendMessage(senderId, {text: "in getTone"});
+  console.log ("Invoked respondAccordingToTone");  
   var ToneAnalyzerV3 = require('watson-developer-cloud/tone-analyzer/v3');
  
   var tone_analyzer = new ToneAnalyzerV3({
@@ -844,8 +790,7 @@ function respondAccordingToTone(senderId,receivedText){
     version_date: process.env.WATSON_VERSION
   });
 
-  //sendMessage(senderId, {text: "in getTone"+receivedText});
- 
+  
   tone_analyzer.tone({ text: receivedText },
     function(err, tone) {
       if (err)
@@ -853,11 +798,9 @@ function respondAccordingToTone(senderId,receivedText){
         console.log ("Error Response from Watson :"+err);
         sendMessage(senderId, {text: "Error Accessing Watson :"+err});
       }
-      else{
-        //sendMessage(senderId, {text: "Tone Received."});
+      else{        
         console.log ("Watson ToneAnalyzer Response :"+JSON.stringify(tone));
-        var emoTones = tone.document_tone.tone_categories[0].tones;
-        //var responded = false;
+        var emoTones = tone.document_tone.tone_categories[0].tones;        
         var maxValue = 0;
         for (var i=0; i<emoTones.length;i++){
           if(emoTones[i].score>0.5){
@@ -877,12 +820,10 @@ function respondAccordingToTone(senderId,receivedText){
             updatedText =  "We are here to help you out to fix your issues. You can have less worry about your issue\n"
             case "anger":
             case "disgust":
-            updatedText =  "I'm sorry. Our support team will get in touch with you now.\n We would also like to provide $5 credit to your account which will be adjusted in next bill.";
-            //responded = true;
+            updatedText =  "I'm sorry. Our support team will get in touch with you now.\n We would also like to provide $5 credit to your account which will be adjusted in next bill.";            
             break;
             case "joy":
-            updatedText = "Glad you are happy with my service.";
-            //responded = true;
+            updatedText = "Glad you are happy with my service.";            
             break;
           }
         } else {
