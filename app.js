@@ -12,6 +12,7 @@ mongoose.connect(process.env.MONGODB_URI);
 
 var Interaction = require("./models/interaction");
 
+
 var app = express();
 app.use(bodyParser.urlencoded({extended: false}));
 app.use(bodyParser.json());
@@ -139,7 +140,7 @@ function sendMessage(recipientId, message) {
   
   insertIntoDatebase(recipientId, message, nluData);
 
-  if(recipientId.indexOf("@") !== -1)
+  if(sourceChannel != "FACEBOOK")
   {
     resToUiPath.status(200).send(message.text);
   }
@@ -165,7 +166,7 @@ function sendMessage(recipientId, message) {
 function findCurrentUser (userId) {
   if (userId.includes("@")) {
     for (var i = 0; i < userArray.length; i++) {
-      if (userArray[i].email === userId) {
+      if (userId.includes(userArray[i].email)) {
           currentUser = userArray[i];
           return currentUser;
       }
@@ -898,6 +899,7 @@ function respondAccordingToTone(senderId,receivedText){
       }
   });
 }
+
 
 function insertIntoDatebase (senderId, message, nluData) {
   if (nluData) {
